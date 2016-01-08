@@ -1,0 +1,5 @@
+name = Place comments
+description = Get comments from Goooogle.
+core = 7.x
+package = WEC
+php = 5.2.4

@@ -1,0 +1,370 @@
+<?php
+/**
+ * Implements hook_menu().
+ */
+function place_comments_menu() {
+  $items = array();
+  $items['admin/config/content/places'] = array(
+    'title' => 'Places',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('place_comments_settings_form'),
+    'access callback' => TRUE,
+  );
+  $items['admin/config/content/places-parse'] = array(
+    'title' => 'Places Parse',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('place_comments_parse_form'),
+    'access callback' => TRUE,
+  );
+  $items['node/%node/place-comments-update'] = array(
+    'title' => t('Get Place comments (Google)'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('place_comments_node_update_form', 1),
+    'access callback' => 'place_comments_node_access_check',
+    'access arguments' => array(1, 'administer site configuration'),
+    'type' => MENU_LOCAL_TASK,
+  );
+  return $items;
+
+}
+
+function place_comments_node_access_check($node) {
+  if ($node->type == 'company' && node_access('update', $node)) {
+    return TRUE;
+  }
+  return FALSE;
+}
+
+function place_comments_parse_form($form, &$form_state) {
+
+  $form = array();
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Update'),
+  );
+  return $form;
+}
+
+function place_comments_parse_form_submit($form, &$form_state) {
+  $nodes = node_load_multiple(array(), array(
+    'type' => 'company',
+    'status' => 1
+  ));
+
+  foreach ($nodes as $node) {
+    $name = '';
+    $site = field_get_items('node', $node, 'field_site');
+    if ($site && is_array($site)) {
+      $name = $site[0]['value'];
+    }
+
+
+    $location = field_get_items('node', $node, 'field_location');
+
+    if ($name && isset($location[0]['latitude']) && isset($location[0]['longitude'])) {
+      $company[] = array(
+        'nid' => $node->nid,
+        'name' => $name,
+        'lat' => $location[0]['latitude'],
+        'lng' => $location[0]['longitude']
+      );
+    }
+  }
+  $batch = array(
+    'title' => t('Get comments from Goooogle...'),
+    'operations' => array(
+      array('place_comments_process_prepare', array($company)),
+      //array('place_comments_process_parse', array()),
+    ),
+    'finished' => 'place_comments_finished_callback',
+  );
+  // Make work for batch
+  batch_set($batch);
+  batch_process();
+
+
+  return FALSE;
+}
+
+function place_comments_node_update_form($form, &$form_state, $node) {
+  $form_state['node'] = $node;
+
+  $form = array();
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Update'),
+  );
+  return $form;
+}
+
+/**
+ * Implements hook_permission().
+ */
+function place_comments_permission() {
+  return array(
+    'Google Place Comments' => array(
+      'title' => t('Get comments from Google Place'),
+    )
+  );
+}
+
+function place_comments_node_update_form_submit($form, &$form_state) {
+
+  if (isset($form_state['node'])) {
+    $node = $form_state['node'];
+    $name = '';
+    $site = field_get_items('node', $node, 'field_site');
+    if ($site && is_array($site)) {
+      $name = $site[0]['value'];
+    }
+
+  }
+  $location = field_get_items('node', $node, 'field_location');
+
+  if ($name && isset($location[0]['latitude']) && isset($location[0]['longitude'])) {
+    $company[] = array(
+      'nid' => $node->nid,
+      'name' => $name,
+      'lat' => $location[0]['latitude'],
+      'lng' => $location[0]['longitude']
+    );
+
+    $batch = array(
+      'title' => t('Get comments from Goooogle...'),
+      'operations' => array(
+        array('place_comments_process_prepare', array($company)),
+      ),
+      'finished' => 'place_comments_finished_callback',
+    );
+    // Make work for batch
+    batch_set($batch);
+    batch_process();
+
+  }
+  return FALSE;
+}
+
+function place_comments_process_prepare($company, &$context) {
+
+  $limit = 11;
+
+  if (empty($context['sandbox']['progress'])) {
+    // Count of processed items
+    $context['sandbox']['progress'] = 0;
+    // Count of node needed to process
+    $context['sandbox']['max'] = count($company);
+  }
+  if (empty($context['sandbox']['items'])) {
+    $context['sandbox']['items'] = $company;
+
+  }
+  $counter = 0;
+  if (!empty($context['sandbox']['items'])) {
+    // Remove from array with processed items executed item
+    if ($context['sandbox']['progress'] != 0) {
+      array_splice($context['sandbox']['items'], 0, $limit);
+    }
+    foreach ($context['sandbox']['items'] as $array) {
+      if ($counter != $limit) {
+
+        $query = new EntityFieldQuery();
+        $query->entityCondition('entity_type', 'comment')
+          ->propertyCondition('nid', $array['nid'])
+          ->addMetaData('account', user_load(1));
+
+        $result = $query->execute();
+        $cids = array();
+        if (isset($result['comment'])) {
+          $cids = array_keys($result['comment']);
+        }
+        if (count($cids) == 0) {
+
+          $url = 'https://maps.googleapis.com/maps/api/place/textsearch/' . 'xml?location=' . $array['lat'] . ',' . $array['lng'] . '&radius=500&query=' . $array['name'] . '&sensor=false&key=';
+          $request = curl_get('https://maps.googleapis.com/maps/api/place/textsearch', 'xml?location=' . $array['lat'] . ',' . $array['lng'] . '&radius=50&query=' . $array['name'] . '&sensor=false&types=university|school&key=' . variable_get('place_api_key', 'AIzaSyCIPYBiIxxFPapnuZipJs00cowBvOes72M'));
+
+          $find_place_result = xml_to_array($request);
+
+          if (!empty($find_place_result['result'])) {
+            $reference = (isset($find_place_result['result'][0]) ? $find_place_result['result'][0]['reference'] : $find_place_result['result']['reference']);
+
+            if ($reference) {
+              $request = curl_get('https://maps.googleapis.com/maps/api/place/details', 'xml?reference=' . $reference . '&sensor=false&key=' . variable_get('place_api_key', 'AIzaSyCIPYBiIxxFPapnuZipJs00cowBvOes72M'));
+              $details = xml_to_array($request);
+              if (!empty($details['result'])) {
+
+                $comments = array();
+                if (isset($details['result']['review'])) {
+                  $comments = $details['result']['review'];
+                  $user = drupal_anonymous_user();
+
+                  foreach ($comments as $gcomment) {
+                    if (!empty($gcomment['text']) && strlen($gcomment['text']) > 5) {
+                      if ($gcomment['author_name'] != "A Google User") {
+                        if ($gcomment['author_url']) {
+                          $page_id = preg_replace("/[^0-9]/", '', $gcomment['author_url']);
+
+                          $response = drupal_http_request('https://www.googleapis.com/plus/v1/people/' . $page_id . '?fields=image&key=AIzaSyCeDPGDIRvfT7BkmODtcrKbsWDNSpgY1LE');
+
+                          if ($response->code == 200) {
+
+                            $image = json_decode($response->data);
+
+                            $image_link = str_replace('sz=50', 'sz=150', $image->image->url);
+                            $image_file = file_get_contents($image_link);
+                            $file = file_save_data($image_file, 'public://' . 'pictures/user-photo/' . $page_id . '.jpg', FILE_EXISTS_REPLACE);
+                          }
+                          if (is_object($file)) {
+
+
+                            $user = user_save(NULL, array(
+                              'name' => $gcomment['author_name'],
+                              'pass' => user_password(),
+                              'mail' => $page_id . '@studyranger.com',
+                              'init' => $page_id . '@studyranger.com',
+                              'status' => 1,
+                              'roles' => array(DRUPAL_AUTHENTICATED_RID => TRUE),
+                              'field_user_avatar' => array(
+                                LANGUAGE_NONE => array(
+                                  0 => array(
+                                    'fid' => $file->fid,
+                                    'uri' => $file->uri,
+                                    'filename' => $file->filename
+
+                                  )
+                                )
+                              ),
+                            ));
+                            unset($file);
+                          }
+                        }
+                      }
+                      $comment = new stdClass();
+                      $comment->nid = $array['nid']; // nid of a node you want to attach a comment to
+                      $comment->cid = 0; // leave it as is
+                      $comment->pid = 0; // parent comment id, 0 if none
+                      if ($user) {
+                        $comment->uid = $user->uid; // user's id, who left the comment
+                      }
+                      else {
+                        $comment->uid = 0; // user's id, who left the comment
+                      }
+
+                      $comment->mail = $page_id . '@wec.in.net'; // user's email
+                      if ($gcomment['author_name'] != "A Google User") {
+                        $comment->name = $gcomment['author_name']; // If user is authenticated you can omit this field, it will be auto-populated, if the user is anonymous and you want to name him somehow, input his name here
+                      }
+                      else {
+                        $comment->name = 'Guest';
+                      }
+                      $comment->thread = $gcomment['author_name']; // OPTIONAL. If you need comments to be threaded you can fill this value. Otherwise omit it.
+                      $comment->hostname = '127.0.01'; // OPTIONAL. You can log poster's ip here
+                      $comment->created = rand(1357467234, 1389003234); // OPTIONAL. You can set any time you want here. Useful for backdated comments creation.
+                      $comment->changed = rand(1357467234, 1389003234);
+                      $comment->is_anonymous = 0; // leave it as is
+                      $comment->homepage = $gcomment['author_url']; // you can add homepage URL here
+                      $comment->status = COMMENT_PUBLISHED; // We auto-publish this comment
+                      $comment->language = LANGUAGE_NONE; // The same as for a node
+                      $comment->subject = $gcomment['author_url'];
+                      $comment->comment_body[$comment->language][0]['value'] = htmlspecialchars_decode($gcomment['text']); // Everything here is pretty much like with a node
+                      $comment->comment_body[$comment->language][0]['format'] = 'filtered_html';
+                      comment_submit($comment); // saving a comment
+                      comment_save($comment);
+                      unset($user);
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        $counter++;
+        $context['sandbox']['progress']++;
+
+        $context['message'] = t('Now places processing %progress of %count ', array(
+          '%progress' => $context['sandbox']['progress'],
+          '%count' => $context['sandbox']['max']
+        ));
+        $context['results']['processed'] = $context['sandbox']['progress'];
+      }
+    }
+  }
+
+  // Check, for end of parse
+  // If count of processed elements equally count of items - process finish
+  if ($context['sandbox']['progress'] != $context['sandbox']['max']) {
+    $context['finished'] = $context['sandbox']['progress'] / $context['sandbox']['max'];
+  }
+  else {
+    if (isset($context['sandbox']['processed'])) {
+      $context['results'] = $context['sandbox']['processed'];
+    }
+
+    //curl_close($context['sandbox']['handler']);
+  }
+}
+
+function place_comments_settings_form() {
+  $form = array();
+  $form['place_api_key'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Set your API key'),
+    '#description' => t('Id what have google'),
+    '#default_value' => variable_get('place_api_key', 'AIzaSyCIPYBiIxxFPapnuZipJs00cowBvOes72M'),
+    '#size' => '45',
+  );
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Set')
+  );
+
+  return $form;
+}
+
+function place_comments_settings_form_submit($delta, $edit = array()) {
+
+  variable_set('place_api_key', $edit['values']['place_api_key']);
+
+}
+
+function xml_to_array($xml, $main_heading = '') {
+  $xml = trim($xml);
+  $pattern = '/windows-1251/';
+  preg_match($pattern, $xml, $matches);
+
+  if (!empty($matches)) {
+    $replacement = 'utf-8';
+    $xml = preg_replace($pattern, $replacement, $xml);
+    $xml = drupal_convert_to_utf8($xml, 'windows-1251');
+  }
+
+  $deXml = simplexml_load_string($xml);
+  $deJson = json_encode($deXml);
+  $xml_array = json_decode($deJson, TRUE);
+
+  if (!empty($main_heading)) {
+    $returned = $xml_array[$main_heading];
+
+    return $returned;
+  }
+  else {
+    return $xml_array;
+  }
+}
+
+/*
+ * Reconnect function if connection down
+ */
+function curl_get($host, $parametrs) {
+  do {
+    $curl = curl_init($host . '/' . $parametrs);
+    curl_setopt($curl, CURLOPT_RETURNTRANSFER, 1);
+    curl_setopt($curl, CURLOPT_HEADER, 0);
+    curl_setopt($curl, CURLOPT_HTTPAUTH, CURLAUTH_ANY);
+    curl_setopt($curl, CURLOPT_FOLLOWLOCATION, TRUE);
+    curl_setopt($curl, CURLOPT_USERAGENT, 'education24.info');
+    $result = curl_exec($curl);
+  }
+  while (curl_errno($curl));
+  return $result;
+}
