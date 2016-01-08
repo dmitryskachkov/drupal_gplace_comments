@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Implements hook_menu().
  */
@@ -28,6 +29,10 @@ function place_comments_menu() {
 
 }
 
+/*
+ * Permission check function for node type @COMPANY
+ */
+
 function place_comments_node_access_check($node) {
   if ($node->type == 'company' && node_access('update', $node)) {
     return TRUE;
@@ -35,6 +40,9 @@ function place_comments_node_access_check($node) {
   return FALSE;
 }
 
+/*
+ * Form to parse action
+ */
 function place_comments_parse_form($form, &$form_state) {
 
   $form = array();
@@ -58,7 +66,6 @@ function place_comments_parse_form_submit($form, &$form_state) {
       $name = $site[0]['value'];
     }
 
-
     $location = field_get_items('node', $node, 'field_location');
 
     if ($name && isset($location[0]['latitude']) && isset($location[0]['longitude'])) {
@@ -74,14 +81,13 @@ function place_comments_parse_form_submit($form, &$form_state) {
     'title' => t('Get comments from Goooogle...'),
     'operations' => array(
       array('place_comments_process_prepare', array($company)),
-      //array('place_comments_process_parse', array()),
     ),
     'finished' => 'place_comments_finished_callback',
   );
+
   // Make work for batch
   batch_set($batch);
   batch_process();
-
 
   return FALSE;
 }
@@ -144,10 +150,12 @@ function place_comments_node_update_form_submit($form, &$form_state) {
   return FALSE;
 }
 
+/*
+ * Preprocess comments
+ */
 function place_comments_process_prepare($company, &$context) {
 
   $limit = 11;
-
   if (empty($context['sandbox']['progress'])) {
     // Count of processed items
     $context['sandbox']['progress'] = 0;
@@ -178,10 +186,8 @@ function place_comments_process_prepare($company, &$context) {
           $cids = array_keys($result['comment']);
         }
         if (count($cids) == 0) {
-
           $url = 'https://maps.googleapis.com/maps/api/place/textsearch/' . 'xml?location=' . $array['lat'] . ',' . $array['lng'] . '&radius=500&query=' . $array['name'] . '&sensor=false&key=';
           $request = curl_get('https://maps.googleapis.com/maps/api/place/textsearch', 'xml?location=' . $array['lat'] . ',' . $array['lng'] . '&radius=50&query=' . $array['name'] . '&sensor=false&types=university|school&key=' . variable_get('place_api_key', 'AIzaSyCIPYBiIxxFPapnuZipJs00cowBvOes72M'));
-
           $find_place_result = xml_to_array($request);
 
           if (!empty($find_place_result['result'])) {
@@ -299,11 +305,12 @@ function place_comments_process_prepare($company, &$context) {
     if (isset($context['sandbox']['processed'])) {
       $context['results'] = $context['sandbox']['processed'];
     }
-
-    //curl_close($context['sandbox']['handler']);
   }
 }
 
+/*
+ * Settings form
+ */
 function place_comments_settings_form() {
   $form = array();
   $form['place_api_key'] = array(
@@ -321,10 +328,11 @@ function place_comments_settings_form() {
   return $form;
 }
 
+/*
+ * Settings form submit
+ */
 function place_comments_settings_form_submit($delta, $edit = array()) {
-
   variable_set('place_api_key', $edit['values']['place_api_key']);
-
 }
 
 function xml_to_array($xml, $main_heading = '') {
