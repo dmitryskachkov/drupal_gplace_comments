@@ -25,14 +25,13 @@ function place_comments_menu() {
     'access arguments' => array(1, 'administer site configuration'),
     'type' => MENU_LOCAL_TASK,
   );
-  return $items;
 
+  return $items;
 }
 
 /*
  * Permission check function for node type @COMPANY
  */
-
 function place_comments_node_access_check($node) {
   if ($node->type == 'company' && node_access('update', $node)) {
     return TRUE;
@@ -53,6 +52,9 @@ function place_comments_parse_form($form, &$form_state) {
   return $form;
 }
 
+/*
+ * Implements hook_form_submit()
+ */
 function place_comments_parse_form_submit($form, &$form_state) {
   $nodes = node_load_multiple(array(), array(
     'type' => 'company',
@@ -92,6 +94,9 @@ function place_comments_parse_form_submit($form, &$form_state) {
   return FALSE;
 }
 
+/*
+ * Implements hook_form_update()
+ */
 function place_comments_node_update_form($form, &$form_state, $node) {
   $form_state['node'] = $node;
 
@@ -114,6 +119,9 @@ function place_comments_permission() {
   );
 }
 
+/*
+ * Implements hook_form_submit()
+ */
 function place_comments_node_update_form_submit($form, &$form_state) {
 
   if (isset($form_state['node'])) {
@@ -151,6 +159,8 @@ function place_comments_node_update_form_submit($form, &$form_state) {
 }
 
 /*
+ * Prepare batch function
+ *
  * Preprocess comments
  */
 function place_comments_process_prepare($company, &$context) {
@@ -208,20 +218,15 @@ function place_comments_process_prepare($company, &$context) {
                       if ($gcomment['author_name'] != "A Google User") {
                         if ($gcomment['author_url']) {
                           $page_id = preg_replace("/[^0-9]/", '', $gcomment['author_url']);
-
                           $response = drupal_http_request('https://www.googleapis.com/plus/v1/people/' . $page_id . '?fields=image&key=AIzaSyCeDPGDIRvfT7BkmODtcrKbsWDNSpgY1LE');
 
                           if ($response->code == 200) {
-
                             $image = json_decode($response->data);
-
                             $image_link = str_replace('sz=50', 'sz=150', $image->image->url);
                             $image_file = file_get_contents($image_link);
                             $file = file_save_data($image_file, 'public://' . 'pictures/user-photo/' . $page_id . '.jpg', FILE_EXISTS_REPLACE);
                           }
                           if (is_object($file)) {
-
-
                             $user = user_save(NULL, array(
                               'name' => $gcomment['author_name'],
                               'pass' => user_password(),
@@ -244,36 +249,50 @@ function place_comments_process_prepare($company, &$context) {
                           }
                         }
                       }
+                      // Create new comment
                       $comment = new stdClass();
-                      $comment->nid = $array['nid']; // nid of a node you want to attach a comment to
-                      $comment->cid = 0; // leave it as is
-                      $comment->pid = 0; // parent comment id, 0 if none
+                      $comment->nid = $array['nid'];
+                      $comment->cid = 0;
+                      // parent comment id, 0 if none
+                      $comment->pid = 0;
                       if ($user) {
-                        $comment->uid = $user->uid; // user's id, who left the comment
+                        // user's id, who left the comment
+                        $comment->uid = $user->uid;
                       }
                       else {
-                        $comment->uid = 0; // user's id, who left the comment
+                        // user's id, who left the comment
+                        $comment->uid = 0;
                       }
 
                       $comment->mail = $page_id . '@wec.in.net'; // user's email
                       if ($gcomment['author_name'] != "A Google User") {
-                        $comment->name = $gcomment['author_name']; // If user is authenticated you can omit this field, it will be auto-populated, if the user is anonymous and you want to name him somehow, input his name here
+                        /*
+                         * If user is authenticated you can omit this field,
+                         * it will be auto-populated, if the user is anonymous and you want to name him somehow, input his name here
+                         */
+                        $comment->name = $gcomment['author_name'];
                       }
                       else {
                         $comment->name = 'Guest';
                       }
-                      $comment->thread = $gcomment['author_name']; // OPTIONAL. If you need comments to be threaded you can fill this value. Otherwise omit it.
-                      $comment->hostname = '127.0.01'; // OPTIONAL. You can log poster's ip here
-                      $comment->created = rand(1357467234, 1389003234); // OPTIONAL. You can set any time you want here. Useful for backdated comments creation.
+                      $comment->thread = $gcomment['author_name'];
+                      // OPTIONAL. You can log poster's ip here
+                      $comment->hostname = '127.0.01';
+                      $comment->created = rand(1357467234, 1389003234);
+                      // OPTIONAL. You can set any time you want here. Useful for backdated comments creation.
                       $comment->changed = rand(1357467234, 1389003234);
                       $comment->is_anonymous = 0; // leave it as is
-                      $comment->homepage = $gcomment['author_url']; // you can add homepage URL here
-                      $comment->status = COMMENT_PUBLISHED; // We auto-publish this comment
-                      $comment->language = LANGUAGE_NONE; // The same as for a node
+                      // you can add homepage URL here
+                      $comment->homepage = $gcomment['author_url'];
+                      // We auto-publish this comment
+                      $comment->status = COMMENT_PUBLISHED;
+                      // The same as for a node
+                      $comment->language = LANGUAGE_NONE;
                       $comment->subject = $gcomment['author_url'];
                       $comment->comment_body[$comment->language][0]['value'] = htmlspecialchars_decode($gcomment['text']); // Everything here is pretty much like with a node
                       $comment->comment_body[$comment->language][0]['format'] = 'filtered_html';
-                      comment_submit($comment); // saving a comment
+                      comment_submit($comment);
+                      // saving a comment
                       comment_save($comment);
                       unset($user);
                     }
@@ -309,6 +328,8 @@ function place_comments_process_prepare($company, &$context) {
 }
 
 /*
+ * Implements hook_form()
+ *
  * Settings form
  */
 function place_comments_settings_form() {
@@ -329,12 +350,17 @@ function place_comments_settings_form() {
 }
 
 /*
+ * Implements hook_form_submit()
+ *
  * Settings form submit
  */
 function place_comments_settings_form_submit($delta, $edit = array()) {
   variable_set('place_api_key', $edit['values']['place_api_key']);
 }
 
+/*
+ * Convert xml to array
+ */
 function xml_to_array($xml, $main_heading = '') {
   $xml = trim($xml);
   $pattern = '/windows-1251/';
